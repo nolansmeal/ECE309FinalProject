@@ -19,6 +19,7 @@
 // SMALLEST element (by less) at the top.
 
 #pragma once
+
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -29,77 +30,178 @@
 template <typename T, typename Less = std::less<T>>
 class MinHeap {
 public:
+    // Constructor
     explicit MinHeap(Less less = Less()) : less_(std::move(less)) {}
 
-    // Adds value. O(log n).
+    // Add a new element to the heap
+    // Time complexity: O(log n)
     void push(T value) {
-        // TODO: append to data_, then sift the new element up.
-        // Clue: compare with less_(a, b), never a < b. Some element types
-        // (e.g. the provided memory_store.cpp's Scored struct) have no
-        // operator<, and a min-heap of std::greater must still work.
-        (void)value;
+        // Add the element to the end of the vector
+        data_.push_back(std::move(value));
+
+        // Move the element upward if necessary
+        sift_up(data_.size() - 1);
     }
 
-    // The smallest element. Throws std::out_of_range if empty. O(1).
+    // Return the smallest element without removing it
+    // Time complexity: O(1)
     const T& top() const {
-        // TODO
-        throw std::out_of_range("MinHeap::top not implemented");
+        if(empty()) {
+            throw std::out_of_range("MinHeap::top on empty heap");
+        }
+
+        return data_[0];
     }
 
-    // Removes and returns the smallest element. Throws std::out_of_range if
-    // empty. O(log n).
+    // Remove and return the smallest element
+    // Time complexity: O(log n)
     T pop() {
-        // TODO: save the root, move the last element to the root, shrink,
-        // sift down, return the saved root.
-        // Clue: check empty() first. With one element, there is no "last
-        // element" to move: just take it and pop_back().
-        // Clue: T result = std::move(data_[0]); then move the last element
-        // into slot 0 (moving avoids copying big strings).
-        throw std::out_of_range("MinHeap::pop not implemented");
+        if(empty()) {
+            throw std::out_of_range("MinHeap::pop on empty heap");
+        }
+
+        // Save the smallest element
+        T result = std::move(data_[0]);
+
+        // If there is only one element, remove it
+        if(data_.size() == 1) {
+            data_.pop_back();
+            return result;
+        }
+
+        // Move the last element to the root
+        data_[0] = std::move(data_.back());
+
+        // Remove the last element
+        data_.pop_back();
+
+        // Restore the min-heap property
+        sift_down(0);
+
+        return result;
     }
 
-    std::size_t size() const noexcept { return data_.size(); }
-    bool        empty() const noexcept { return data_.empty(); }
-    void        clear() noexcept { data_.clear(); }
+    // Return the number of elements
+    std::size_t size() const noexcept {
+        return data_.size();
+    }
+
+    // Check if the heap is empty
+    bool empty() const noexcept {
+        return data_.empty();
+    }
+
+    // Remove all elements
+    void clear() noexcept {
+        data_.clear();
+    }
 
 private:
-    // ===== YOUR HELPERS AND MEMBERS =====
-    // Children of index i are 2i+1 and 2i+2; its parent is (i-1)/2.
-    // Suggested: void sift_up(std::size_t i);  void sift_down(std::size_t i);
-    // Clue: use std::size_t (not int) for indices, or -Wsign-compare warns
-    // every time you compare with data_.size(). Careful: (i-1)/2 with i == 0
-    // underflows, so sift_up must stop at i == 0.
-    // Clue: in sift_down, the right child may not exist: check
-    // 2*i+2 < data_.size() before reading it. Swap with the SMALLER child.
+    // Move an element upward until the heap property is restored
+    void sift_up(std::size_t i) {
+        while(i > 0) {
+            // Find the parent index
+            std::size_t parent = (i - 1) / 2;
 
+            // Stop if the child is not smaller than the parent
+            if(!less_(data_[i], data_[parent])) {
+                break;
+            }
+
+            // Swap the child and parent
+            std::swap(data_[i], data_[parent]);
+
+            // Continue from the parent's index
+            i = parent;
+        }
+    }
+
+    // Move an element downward until the heap property is restored
+    void sift_down(std::size_t i) {
+        std::size_t n = data_.size();
+
+        while(true) {
+            // Find the left and right child indices
+            std::size_t left = 2 * i + 1;
+            std::size_t right = 2 * i + 2;
+
+            // Assume the current element is the smallest
+            std::size_t smallest = i;
+
+            // Check the left child
+            if(left < n && less_(data_[left], data_[smallest])) {
+                smallest = left;
+            }
+
+            // Check the right child
+            if(right < n && less_(data_[right], data_[smallest])) {
+                smallest = right;
+            }
+
+            // Stop if the current element is already smallest
+            if(smallest == i) {
+                break;
+            }
+
+            // Swap with the smaller child
+            std::swap(data_[i], data_[smallest]);
+
+            // Continue checking downward
+            i = smallest;
+        }
+    }
+
+    // Vector used to store heap elements
     std::vector<T> data_;
-    Less           less_;
+
+    // Comparator used to determine ordering
+    Less less_;
 };
 
-// Returns the k LARGEST items of `items` (by `less`), largest first.
-//   * k == 0 or items empty -> empty result
-//   * k >= items.size()     -> every item, largest first
-// Must keep a MinHeap of at most k items (the k largest seen so far, with
-// the smallest of them on top), so it runs in O(n log k) time and O(k) extra
-// space. Items that compare equal may come out in any order.
+// Return the k largest elements in descending order
+// Time complexity: O(n log k) for 1 <= k <= n
+// Extra space: O(k)
 template <typename T, typename Less = std::less<T>>
 std::vector<T> top_k(const std::vector<T>& items, std::size_t k, Less less = Less()) {
-    // TODO: keep a MinHeap<T, Less> of at most k items. For each item: if
-    // the heap has fewer than k items, push it; otherwise, if the heap's top
-    // is less than the item, pop the top and push the item. At the end, pop
-    // everything (smallest first) and return it reversed.
-    //
-    // Clues:
-    //  * k == 0: return {} BEFORE the loop (top() on an empty heap throws).
-    //  * Build the heap WITH the comparator:  MinHeap<T, Less> heap(less);
-    //    Writing  MinHeap<T, Less> heap;  fails for lambdas ("use of deleted
-    //    function ... lambda") because a lambda can't be default-constructed.
-    //  * "top is less than the item" means  less(heap.top(), item),  not
-    //    heap.top() < item.  Read less(a, b) as "a is WORSE than b": the heap
-    //    keeps the k best items with the worst of them on top.
-    //  * std::reverse (from <algorithm>) flips a vector.
-    (void)items;
-    (void)k;
-    (void)less;
-    return {};
+    // Return an empty vector if k is zero or there are no items
+    if(k == 0 || items.empty()) {
+        return {};
+    }
+
+    // Make sure k does not exceed the number of items
+    if(k > items.size()) {
+        k = items.size();
+    }
+
+    // Create a min-heap with the given comparator
+    MinHeap<T, Less> heap(less);
+
+    // Go through every element
+    for(const T& item : items) {
+        // Add elements until the heap contains k elements
+        if(heap.size() < k) {
+            heap.push(item);
+        }
+        // Replace the smallest element if the new element is larger
+        else if(less(heap.top(), item)) {
+            heap.pop();
+            heap.push(item);
+        }
+    }
+
+    // Create a vector to store the result
+    std::vector<T> result;
+
+    // Reserve enough space for the selected elements
+    result.reserve(heap.size());
+
+    // Remove elements from the heap
+    while(!heap.empty()) {
+        result.push_back(heap.pop());
+    }
+
+    // Reverse the vector so the largest elements come first
+    std::reverse(result.begin(), result.end());
+
+    return result;
 }

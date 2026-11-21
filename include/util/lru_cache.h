@@ -49,13 +49,23 @@ public:
     //      pointer to its value (valid until the next put/erase/clear).
     // Miss: counts a miss and returns nullptr.
     const Value* get(const Key& key) {
-        // TODO
-        // Clue: look keys up with  auto it = map_.find(key);  and compare
-        // with map_.end(). Do NOT use map_[key] to look up: on a miss it
-        // INSERTS the key (with a nullptr node), size() grows, and a later
-        // put() crashes far away from the real bug.
-        (void)key;
-        return nullptr;
+        // Search for the key in the hash map
+        auto it = map_.find(key);
+
+        // If the key does not exist, count a miss
+        if(it == map_.end()) {
+            stats_.misses++;
+            return nullptr;
+        }
+
+        // Count a successful lookup
+        stats_.hits++;
+
+        // Move the accessed node to the front
+        Node* node = it->second;
+        move_to_front(node);
+
+        return &node->value;
     }
 
     // Key present: replaces its value and marks it most recently used (no
@@ -64,39 +74,107 @@ public:
     //   (counting one eviction), then inserts the new entry as most recently
     //   used. With capacity 0, does nothing.
     void put(const Key& key, Value value) {
-        // TODO
-        // Clue (eviction): victim = tail_; unlink it; erase victim->key from
-        // the map; THEN delete victim. Reading victim->key after delete is a
-        // heap-use-after-free (ASan may show it as a SEGV inside hashtable
-        // code: look for the first stack frame in lru_cache.h).
-        // Clue: create nodes with  new Node{key, std::move(value), nullptr, nullptr}.
-        (void)key;
-        (void)value;
+        // A cache with zero capacity cannot store anything
+        if(capacity_ == 0) {
+            return;
+        }
+
+        // Check whether the key already exists
+        auto it = map_.find(key);
+
+        if(it != map_.end()) {
+            // Update the existing value
+            Node* node = it->second;
+            node->value = std::move(value);
+
+            // Mark the updated node as most recently used
+            move_to_front(node);
+            return;
+        }
+
+        // Create a new node
+        Node* newNode = new Node{key, std::move(value), nullptr, nullptr};
+
+        // Store the key and node pointer in the hash map
+        try {
+            map_.emplace(newNode->key, newNode);
+        }
+        catch(...) {
+            delete newNode;
+            throw;
+        }
+
+        // If the cache is full, remove the least recently used node
+        if(map_.size() > capacity_) {
+            Node* victim = tail_;
+
+            // Remove the node from the linked list
+            unlink(victim);
+
+            // Remove the key from the hash map before deleting the node
+            map_.erase(victim->key);
+
+            // Free the memory used by the node
+            delete victim;
+
+            // Count the eviction
+            stats_.evictions++;
+        }
+
+        // Insert the new node at the front of the list
+        push_front(newNode);
     }
 
     // True if the key is cached. Does NOT change recency or stats.
     bool contains(const Key& key) const {
-        // TODO
-        // Clue: this function is const, so map_[key] does not even compile
-        // ("discards qualifiers"). Use map_.find(key) != map_.end() or
-        // map_.count(key).
-        (void)key;
-        return false;
+        return map_.find(key) != map_.end();
     }
 
     // Removes the key if present (not an eviction). Returns whether it was.
     bool erase(const Key& key) {
-        // TODO
-        (void)key;
-        return false;
+        // Search for the key
+        auto it = map_.find(key);
+
+        if(it == map_.end()) {
+            return false;
+        }
+
+        // Get the node associated with the key
+        Node* node = it->second;
+
+        // Remove the node from the linked list
+        unlink(node);
+
+        // Remove the key from the hash map
+        map_.erase(it);
+
+        // Free the node's memory
+        delete node;
+
+        return true;
     }
 
     // Removes every entry. Stats are kept.
     void clear() {
-        // TODO: delete every node, empty the map, reset head_/tail_.
-        // Clue: save n->next in a local BEFORE  delete n;  a loop like
-        //   for (Node* n = head_; n; n = n->next) delete n;
-        // reads n->next from freed memory.
+        Node* current = head_;
+
+        // Walk through the linked list and delete each node
+        while(current != nullptr) {
+            // Save the next pointer before deleting the current node
+            Node* next = current->next;
+
+            delete current;
+
+            // Continue to the next node
+            current = next;
+        }
+
+        // Remove all entries from the hash map
+        map_.clear();
+
+        // Reset the linked list pointers
+        head_ = nullptr;
+        tail_ = nullptr;
     }
 
     std::size_t size() const noexcept { return map_.size(); }
@@ -120,12 +198,68 @@ private:
     };
 
     // ===== YOUR HELPERS AND MEMBERS =====
-    // Suggested helpers: unlink(Node*), push_front(Node*), move_to_front(Node*).
-    // Clue for unlink(n): four cases. If n has a prev, prev->next skips n,
-    // otherwise n was head_ and head_ moves to n->next. Likewise, if n has
-    // a next, next->prev skips n, otherwise n was tail_ and tail_ moves to
-    // n->prev. Unlinking the only node leaves head_ == tail_ == nullptr.
-    // Spec Appendix B lists every pointer write.
+
+    // Remove a node from the doubly linked list
+    // Does not delete the node
+    void unlink(Node* node) {
+        // Connect the previous node to the next node
+        if(node->prev != nullptr) {
+            node->prev->next = node->next;
+        }
+        else {
+            // The node was the head
+            head_ = node->next;
+        }
+
+        // Connect the next node to the previous node
+        if(node->next != nullptr) {
+            node->next->prev = node->prev;
+        }
+        else {
+            // The node was the tail
+            tail_ = node->prev;
+        }
+
+        // Disconnect the node from the list
+        node->prev = nullptr;
+        node->next = nullptr;
+    }
+
+    // Insert a node at the front of the linked list
+    void push_front(Node* node) {
+        // The new node has no previous node
+        node->prev = nullptr;
+
+        // Point the new node to the current head
+        node->next = head_;
+
+        // Update the previous pointer of the old head
+        if(head_ != nullptr) {
+            head_->prev = node;
+        }
+
+        // Make the new node the head
+        head_ = node;
+
+        // If the list was empty, the new node is also the tail
+        if(tail_ == nullptr) {
+            tail_ = node;
+        }
+    }
+
+    // Move an existing node to the front of the list
+    void move_to_front(Node* node) {
+        // The node is already the most recently used
+        if(node == head_) {
+            return;
+        }
+
+        // Remove the node from its current position
+        unlink(node);
+
+        // Insert it at the front
+        push_front(node);
+    }
 
     std::unordered_map<Key, Node*, Hash> map_;
     Node*       head_ = nullptr;
